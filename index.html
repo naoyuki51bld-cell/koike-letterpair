@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PairFlow 4 - レターペア強化プロトタイプ v5</title>
+  <title>ImageChain</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -43,16 +43,55 @@
         margin-left: 8px;
         color: #cbd5e1;
     }
+    
+    /* 編集可能なセルのスタイル */
+    [contenteditable="true"]:empty:before {
+        content: attr(placeholder);
+        color: #64748b;
+        pointer-events: none;
+        display: block; 
+    }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-200 font-sans min-h-screen flex flex-col">
+<body class="bg-slate-900 text-slate-200 font-sans min-h-screen flex flex-col relative">
 
+  <!-- ============================================== -->
+  <!-- LOGIN OVERLAY -->
+  <!-- ============================================== -->
+  <div id="auth-overlay" class="fixed inset-0 bg-slate-900 z-[100] flex flex-col items-center justify-center">
+      <div id="auth-loading" class="text-2xl font-bold text-teal-400 mb-4 flex flex-col items-center gap-4">
+          <i class="fa-solid fa-spinner fa-spin text-4xl"></i>
+          <span>データを同期しています...</span>
+      </div>
+      
+      <div id="auth-login" class="hidden text-center p-8 bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl max-w-md w-full">
+          <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 mb-4"><i class="fa-solid fa-link"></i> ImageChain</h1>
+          <p class="text-slate-400 mb-6 text-sm">アカウントにログインして、辞書データと学習記録をクラウドに同期しましょう。</p>
+          
+          <div class="flex flex-col gap-3 mb-6">
+              <input type="email" id="auth-email" placeholder="メールアドレス" class="w-full p-3 rounded bg-slate-900 border border-slate-600 text-white focus:outline-none focus:border-blue-500">
+              <input type="password" id="auth-password" placeholder="パスワード (6文字以上)" class="w-full p-3 rounded bg-slate-900 border border-slate-600 text-white focus:outline-none focus:border-blue-500">
+              <div class="flex gap-2 mt-2">
+                  <button onclick="signInWithEmail()" class="flex-1 py-3 bg-blue-600 text-white font-bold rounded shadow hover:bg-blue-500 transition">
+                      ログイン
+                  </button>
+                  <button onclick="signUpWithEmail()" class="flex-1 py-3 bg-slate-600 text-white font-bold rounded shadow hover:bg-slate-500 transition">
+                      新規登録
+                  </button>
+              </div>
+          </div>
+      </div>
+  </div>
+
+  <!-- ============================================== -->
   <!-- Navigation -->
+  <!-- ============================================== -->
   <nav class="bg-slate-800 p-4 shadow-lg flex justify-between items-center sticky top-0 z-50 overflow-x-auto whitespace-nowrap">
     <div class="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 flex items-center gap-2 mr-4">
-      <i class="fa-solid fa-link"></i> PairFlow 4
+      <i class="fa-solid fa-link"></i> ImageChain
     </div>
-    <div class="space-x-2 flex">
+    
+    <div class="space-x-2 flex flex-grow">
       <button onclick="switchTab('training')" id="nav-training" class="px-4 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-500 transition">
         <i class="fa-solid fa-stopwatch mr-1"></i> Training
       </button>
@@ -72,6 +111,26 @@
         <i class="fa-solid fa-gear mr-1"></i> Settings
       </button>
     </div>
+    
+    <!-- グローバル・スロット切り替え -->
+    <div class="flex items-center gap-3 border-l border-slate-600 pl-4 ml-2">
+        <label class="text-sm font-bold text-slate-300"><i class="fa-solid fa-folder-open mr-1"></i> 現在のスロット:</label>
+        <select id="global-slot-select" class="bg-blue-900 border border-blue-500 text-white font-bold rounded p-1.5 focus:outline-none cursor-pointer" onchange="changeGlobalSlot(this.value)">
+            <option value="1">スロット 1</option>
+            <option value="2">スロット 2</option>
+            <option value="3">スロット 3</option>
+            <option value="4">スロット 4</option>
+            <option value="5">スロット 5</option>
+        </select>
+    </div>
+
+    <!-- User Info & Logout -->
+    <div class="flex items-center gap-4 ml-4 border-l border-slate-600 pl-4">
+        <span id="user-name-display" class="text-sm text-slate-400 font-medium"></span>
+        <button onclick="signOutUser()" class="text-slate-400 hover:text-red-400 transition" title="ログアウト">
+            <i class="fa-solid fa-right-from-bracket text-xl"></i>
+        </button>
+    </div>
   </nav>
 
   <!-- Main Content Area -->
@@ -82,7 +141,8 @@
     <!-- ============================================== -->
     <div id="view-training" class="flex-grow flex flex-col items-center justify-center p-6 w-full max-w-4xl mx-auto">
       <div id="train-start-screen" class="text-center w-full">
-        <h2 class="text-3xl font-bold mb-4">Image-Chain Training</h2>
+        <h2 class="text-3xl font-bold mb-2">Image-Chain Training</h2>
+        <div class="text-sm text-blue-400 font-bold mb-4">対象: スロット <span class="slot-display-text">1</span> / モード: <span id="train-mode-display">ランダム</span></div>
         <p class="text-slate-400 mb-8" id="training-desc">形容詞 → 名詞(主語) → 動詞 → 名詞(目的語)<br>4つのレターペアから瞬時に情景をイメージせよ。</p>
         <button onclick="startTrainingSession()" class="px-8 py-4 bg-gradient-to-r from-blue-500 to-teal-500 rounded-full text-2xl font-bold text-white shadow-[0_0_20px_rgba(59,130,246,0.5)] hover:scale-105 transition transform">
           START SESSION <span class="text-sm block font-normal text-blue-100">(Spaceキーで開始)</span>
@@ -126,7 +186,8 @@
     <div id="view-quiz" class="hidden flex-grow flex flex-col items-center justify-center p-6 w-full max-w-4xl mx-auto">
       
       <div id="quiz-start-screen" class="text-center w-full">
-        <h2 class="text-3xl font-bold mb-4 text-purple-400"><i class="fa-solid fa-question-circle"></i> Memory Quiz</h2>
+        <h2 class="text-3xl font-bold mb-2 text-purple-400"><i class="fa-solid fa-question-circle"></i> Memory Quiz</h2>
+        <div class="text-sm text-purple-300 font-bold mb-4">対象: スロット <span class="slot-display-text">1</span> / モード: <span id="quiz-mode-display">ランダム</span></div>
         <p class="text-slate-400 mb-8">
           1. レターペアを表示し、記憶（タイマー計測）<br>
           2. 完了後、10秒間待機（記憶定着フェーズ）<br>
@@ -173,7 +234,9 @@
     <!-- HISTORY VIEW -->
     <!-- ============================================== -->
     <div id="view-history" class="hidden flex-grow flex flex-col p-8 w-full max-w-5xl mx-auto overflow-y-auto">
-      <h2 class="text-2xl font-bold mb-6"><i class="fa-solid fa-clock-rotate-left mr-2"></i> History</h2>
+      <div class="flex justify-between items-center mb-6">
+          <h2 class="text-2xl font-bold"><i class="fa-solid fa-clock-rotate-left mr-2"></i> History <span class="text-sm font-normal text-slate-400 ml-2">(スロット <span class="slot-display-text">1</span> のデータ)</span></h2>
+      </div>
       
       <div class="flex space-x-2 border-b border-slate-700 mb-6">
         <button onclick="switchHistoryTab('training')" id="htab-training" class="px-4 py-2 font-bold text-blue-400 border-b-2 border-blue-400">Training 履歴</button>
@@ -181,7 +244,6 @@
         <button onclick="switchHistoryTab('missed')" id="htab-missed" class="px-4 py-2 font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-200">×一覧 (Missed)</button>
       </div>
 
-      <!-- Training History Content -->
       <div id="hcontent-training" class="bg-slate-800 rounded-xl border border-slate-700 p-4 overflow-x-auto">
         <table class="w-full text-sm text-left whitespace-nowrap">
           <thead class="bg-slate-700/50 text-slate-300">
@@ -197,7 +259,6 @@
         </table>
       </div>
 
-      <!-- Quiz History Content -->
       <div id="hcontent-quiz" class="hidden bg-slate-800 rounded-xl border border-slate-700 p-4 overflow-x-auto">
         <table class="w-full text-sm text-left whitespace-nowrap">
           <thead class="bg-slate-700/50 text-slate-300">
@@ -213,9 +274,8 @@
         </table>
       </div>
 
-      <!-- Missed Words Content -->
       <div id="hcontent-missed" class="hidden flex flex-col gap-6">
-        <p class="text-sm text-slate-400">Trainingで「×(失敗)」または「Miss」と評価された単語の一覧です。</p>
+        <p class="text-sm text-slate-400">「×(失敗)」または「Miss」と評価された単語の一覧です。</p>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
                 <h3 class="text-lg font-bold text-blue-400 mb-3 border-b border-slate-600 pb-2">名詞</h3>
@@ -235,11 +295,11 @@
 
 
     <!-- ============================================== -->
-    <!-- ANALYSIS, DICTIONARY, SETTINGS VIEW -->
+    <!-- ANALYSIS VIEW -->
     <!-- ============================================== -->
     <div id="view-analysis" class="hidden flex-grow flex flex-col p-8 w-full max-w-5xl mx-auto overflow-y-auto">
       <div class="flex justify-between items-center mb-6">
-        <h2 class="text-2xl font-bold"><i class="fa-solid fa-fire mr-2 text-orange-500"></i>弱点分析ヒートマップ</h2>
+        <h2 class="text-2xl font-bold"><i class="fa-solid fa-fire mr-2 text-orange-500"></i>弱点分析ヒートマップ <span class="text-sm font-normal text-slate-400 ml-2">(スロット <span class="slot-display-text">1</span>)</span></h2>
         <div class="text-sm flex gap-4 bg-slate-800 p-2 rounded">
           <div class="flex items-center gap-1"><div class="w-3 h-3 color-excellent rounded"></div> 超速</div>
           <div class="flex items-center gap-1"><div class="w-3 h-3 color-good rounded"></div> 普通</div>
@@ -257,47 +317,87 @@
       </div>
     </div>
 
+    <!-- ============================================== -->
+    <!-- DICTIONARY VIEW -->
+    <!-- ============================================== -->
     <div id="view-dictionary" class="hidden flex-grow flex flex-col p-8 w-full max-w-5xl mx-auto overflow-y-auto">
+      
+      <div class="flex items-center justify-between mb-4">
+          <h2 class="text-2xl font-bold"><i class="fa-solid fa-book mr-2"></i> Dictionary Management <span class="text-sm font-normal text-slate-400 ml-2">(スロット <span class="slot-display-text">1</span>)</span></h2>
+          <button onclick="saveDictionary()" class="px-6 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded shadow transition flex items-center gap-2">
+              <i class="fa-solid fa-cloud-arrow-up"></i> 変更を保存
+          </button>
+      </div>
+
       <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 mb-8">
         <h3 class="text-xl font-bold mb-4"><i class="fa-solid fa-file-excel mr-2 text-green-500"></i> スプレッドシートからインポート</h3>
+        <p class="text-sm text-slate-400 mb-4">
+          <strong class="text-red-400">【注意】</strong> インポートを実行すると、<strong class="text-white">現在選択中のスロット（スロット <span class="slot-display-text">1</span>）の<br>
+          辞書と過去の成績データや履歴が完全にリセット（削除）され、新しい状態になります。</strong><br>
+          (1シート目：名詞、2シート目：動詞、3シート目：形容詞 / A列に1文字目、1行目に2文字目のマトリックス形式)
+        </p>
         <input type="file" id="excel-upload" accept=".xlsx, .xls" class="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer border border-slate-600 rounded-full p-1 bg-slate-900" onchange="handleFileUpload(event)"/>
       </div>
+      
+      <h3 class="text-xl font-bold mb-2 text-blue-300">表を直接クリックして編集できます</h3>
+      <p class="text-sm text-slate-400 mb-4">セルをクリックして単語を入力し、右上の<strong class="text-green-400">「変更を保存」ボタン</strong>を押すことでクラウドに保存されます。</p>
+
       <div class="flex space-x-2 border-b border-slate-700 mb-4">
         <button onclick="renderDictTable('noun')" id="tab-noun" class="px-4 py-2 font-bold text-blue-400 border-b-2 border-blue-400">名詞</button>
         <button onclick="renderDictTable('verb')" id="tab-verb" class="px-4 py-2 font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-200">動詞</button>
         <button onclick="renderDictTable('adj')" id="tab-adj" class="px-4 py-2 font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-200">形容詞</button>
       </div>
-      <div class="overflow-x-auto bg-slate-800 rounded-xl border border-slate-700 p-4">
-        <table id="dict-table" class="w-full text-sm text-left whitespace-nowrap"></table>
+      <div class="overflow-x-auto bg-slate-800 rounded-xl border border-slate-700 p-4 shadow-inner">
+        <table id="dict-table" class="w-full text-sm text-left whitespace-nowrap border-collapse"></table>
       </div>
     </div>
 
+    <!-- ============================================== -->
+    <!-- SETTINGS VIEW -->
+    <!-- ============================================== -->
     <div id="view-settings" class="hidden flex-grow flex flex-col p-8 w-full max-w-3xl mx-auto overflow-y-auto">
-        <h2 class="text-2xl font-bold mb-6"><i class="fa-solid fa-gear mr-2"></i> Settings</h2>
+        <h2 class="text-2xl font-bold mb-6"><i class="fa-solid fa-gear mr-2"></i> Settings <span class="text-sm font-normal text-slate-400 ml-2">(スロット <span class="slot-display-text">1</span> の設定)</span></h2>
         <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 mb-6 space-y-6">
+            
+            <!-- ① モード選択 -->
             <div>
-                <label class="block text-lg font-bold mb-2">① レターペアの数 (1〜8)</label>
+                <label class="block text-lg font-bold mb-2">① トレーニングモード</label>
+                <select id="setting-training-mode" class="bg-slate-700 border border-slate-600 text-white rounded p-2 focus:outline-none w-full max-w-xs" onchange="appSettings.trainingMode = this.value">
+                    <option value="random">完全ランダムモード</option>
+                    <option value="weak">苦手集中モード (ミスや遅いペアを優先)</option>
+                </select>
+            </div>
+            <hr class="border-slate-700">
+
+            <!-- ② ペア数 -->
+            <div>
+                <label class="block text-lg font-bold mb-2">② レターペアの数 (1〜8)</label>
                 <div class="flex items-center gap-4">
                     <input type="range" id="setting-pair-count" min="1" max="8" value="4" class="w-full max-w-xs accent-blue-500" oninput="updatePairCountDisplay(this.value)">
                     <span id="pair-count-display" class="text-2xl font-bold text-teal-400 w-8 text-center">4</span>
                 </div>
             </div>
             <hr class="border-slate-700">
+            
+            <!-- ③ 品詞シーケンス -->
             <div>
-                <label class="block text-lg font-bold mb-2">② 各スロットの品詞設定</label>
+                <label class="block text-lg font-bold mb-2">③ 各スロットの品詞設定</label>
                 <div id="pos-sequence-container" class="flex flex-wrap gap-4"></div>
             </div>
             <hr class="border-slate-700">
+            
+            <!-- ④ んの制限 -->
             <div>
-                <label class="block text-lg font-bold mb-2">③ 二文字目が「ん」の表示制限</label>
+                <label class="block text-lg font-bold mb-2">④ 二文字目が「ん」の表示制限</label>
                 <div class="flex items-center gap-3">
                     <input type="checkbox" id="setting-restrict-n" class="w-5 h-5 accent-blue-500 rounded cursor-pointer" checked>
                     <label for="setting-restrict-n" class="cursor-pointer text-slate-300">特定の場所（末尾など）でのみ表示する</label>
                 </div>
             </div>
+            
             <div class="mt-8 flex justify-end">
                 <button onclick="saveSettings()" class="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded shadow transition">
-                    設定を保存
+                    設定をクラウドに保存
                 </button>
             </div>
         </div>
@@ -305,32 +405,213 @@
 
   </main>
 
-  <script>
+  <!-- FIREBASE INTEGRATION SCRIPT -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js";
+    import { getAuth, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAy88Z5MTSaRWLgIiXiccS-mAUmrzdxH0g",
+      authDomain: "koike-memory-train.firebaseapp.com",
+      projectId: "koike-memory-train",
+      storageBucket: "koike-memory-train.firebasestorage.app",
+      messagingSenderId: "672224382539",
+      appId: "1:672224382539:web:ea79bb605334d28631c7ce",
+      measurementId: "G-ZJ89WY2PMM"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
     // ==========================================
-    // データ・ステート管理
+    // データ・ステート管理 (スロット1~5で完全分離)
     // ==========================================
-    let dictionary = {
+    let dictionaries = {};
+    let stats = {};
+    let missedWords = {};
+    let historyTraining = {}; 
+    let historyQuiz = {}; 
+    
+    // スロットごとの初期化
+    for(let i=1; i<=5; i++) {
+        dictionaries[i] = { noun: {}, verb: {}, adj: {} };
+        stats[i] = { noun: {}, verb: {}, adj: {} };
+        missedWords[i] = { noun: [], verb: [], adj: [] };
+        historyTraining[i] = [];
+        historyQuiz[i] = [];
+    }
+    
+    // ダミー初期データ (スロット1のみ)
+    dictionaries[1] = {
       noun: { 'あか':'赤', 'あい':'愛', 'あう':'会う人', 'あき':'秋', 'あく':'悪', 'かあ':'母', 'かい':'貝', 'かう':'カウボーイ', 'かき':'柿', 'かく':'核', 'かん':'缶', 'あん':'餡' },
       verb: { 'あか':'明かす', 'あい':'愛する', 'あう':'会う', 'あき':'飽きる', 'あく':'開く', 'かあ':'庇う', 'かい':'飼う', 'かう':'買う', 'かき':'掻く', 'かく':'書く', 'かん':'噛む', 'あん':'案じる' },
       adj: { 'あか':'赤い', 'あい':'愛想いい', 'あう':'危うい', 'あき':'呆れる', 'あく':'あくどい', 'かあ':'可愛い', 'かい':'痒い', 'かう':'香ばしい', 'かき':'活気ある', 'かく':'かくかくした', 'かん':'悲しい', 'あん':'暗澹たる' }
     };
 
-    let stats = { noun: {}, verb: {}, adj: {} };
-    let appSettings = { pairCount: 4, posSequence: ['adj', 'noun', 'verb', 'noun'], restrictN: true };
+    let appSettings = { 
+        currentSlot: 1, 
+        trainingMode: 'random', 
+        pairCount: 4, 
+        posSequence: ['adj', 'noun', 'verb', 'noun'], 
+        restrictN: true 
+    };
+
     let currentActiveTab = 'training';
-
+    let currentHeatmapPos = 'noun';
+    
+    // Process States
     let currentSessionData = []; let timerInterval = null; let startTime = 0; let finalTime = 0; let isTrainingActive = false; let isWaitingEvaluation = false;
-    let historyTraining = []; let historyQuiz = []; let missedWords = { noun: [], verb: [], adj: [] }; 
     let quizState = 'idle'; let quizSessionData = []; let quizStartTime = 0; let quizMemTime = 0; let quizTimerInterval = null; let quizCountdownTimer = null;
+    let isAppInitialized = false;
 
-    document.addEventListener('DOMContentLoaded', () => {
-        initSettingsUI(); updateTrainingDescription(); setupKeyboardShortcuts(); renderHistoryMissed();
+    // ==========================================
+    // Firebase Cloud Sync Functions
+    // ==========================================
+    async function loadUserDataFromCloud(user) {
+        try {
+            const docRef = doc(db, "users", user.uid);
+            const docSnap = await getDoc(docRef);
+            
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                
+                // Dictionaries, Stats, MissedWords
+                if(data.dictionaries) dictionaries = data.dictionaries;
+                else if (data.dictionary) dictionaries[1] = data.dictionary;
+                
+                if(data.stats && data.stats[1]) stats = data.stats;
+                else if (data.stats) stats[1] = data.stats;
+                
+                if(data.missedWords && data.missedWords[1]) missedWords = data.missedWords;
+                else if (data.missedWords) missedWords[1] = data.missedWords;
+                
+                if(data.settings) appSettings = {...appSettings, ...data.settings};
+                
+                // History マイグレーション (配列からスロット別オブジェクトへ)
+                if(data.historyTraining) {
+                    if (Array.isArray(data.historyTraining)) {
+                        data.historyTraining.forEach(h => { let sid = h.dictId || 1; if(historyTraining[sid]) historyTraining[sid].push(h); });
+                    } else { historyTraining = data.historyTraining; }
+                }
+                if(data.historyQuiz) {
+                    if (Array.isArray(data.historyQuiz)) {
+                        data.historyQuiz.forEach(h => { let sid = h.dictId || 1; if(historyQuiz[sid]) historyQuiz[sid].push(h); });
+                    } else { historyQuiz = data.historyQuiz; }
+                }
+                
+                // Settings スロットの補正
+                if (data.settings && data.settings.activeDict && !data.settings.currentSlot) {
+                    appSettings.currentSlot = data.settings.activeDict; // 過去バージョン互換
+                }
+                
+                console.log("クラウドからデータをロードしました。");
+            } else {
+                await window.saveUserDataToCloud();
+            }
+            
+            // UI連動
+            document.getElementById('global-slot-select').value = appSettings.currentSlot;
+            updateSlotDisplays();
+            initSettingsUI();
+            updateTrainingDescription();
+            window.renderDictTable('noun');
+            window.renderAllHistory();
+            if (currentActiveTab === 'analysis') window.renderHeatmap(currentHeatmapPos);
+            
+        } catch (error) {
+            console.error("データ読み込みエラー:", error);
+            alert("データの同期に失敗しました。再読み込みしてください。");
+        }
+    }
+
+    window.saveUserDataToCloud = async () => {
+        if (!auth.currentUser) return;
+        try {
+            await setDoc(doc(db, "users", auth.currentUser.uid), {
+                dictionaries: dictionaries,
+                stats: stats,
+                settings: appSettings,
+                historyTraining: historyTraining,
+                historyQuiz: historyQuiz,
+                missedWords: missedWords
+            });
+        } catch (error) {
+            console.error("データ保存エラー:", error);
+        }
+    }
+
+    // ==========================================
+    // Auth Listener & Login
+    // ==========================================
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            document.getElementById('auth-login').classList.add('hidden');
+            document.getElementById('auth-loading').classList.remove('hidden');
+            document.getElementById('user-name-display').innerText = user.email;
+            
+            await loadUserDataFromCloud(user);
+            document.getElementById('auth-overlay').classList.add('hidden');
+            
+            if (!isAppInitialized) {
+                setupKeyboardShortcuts();
+                isAppInitialized = true;
+            }
+        } else {
+            document.getElementById('auth-overlay').classList.remove('hidden');
+            document.getElementById('auth-loading').classList.add('hidden');
+            document.getElementById('auth-login').classList.remove('hidden');
+        }
     });
 
+    window.signInWithEmail = async () => {
+        const email = document.getElementById('auth-email').value.trim();
+        const password = document.getElementById('auth-password').value;
+        if (!email || !password) return alert("メールアドレスとパスワードを入力してください。");
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+        } catch (error) {
+            alert("ログインに失敗しました。メールアドレスまたはパスワードが間違っています。");
+        }
+    };
+
+    window.signUpWithEmail = async () => {
+        const email = document.getElementById('auth-email').value.trim();
+        const password = document.getElementById('auth-password').value;
+        if (!email || !password) return alert("メールアドレスとパスワードを入力してください。");
+        if (password.length < 6) return alert("パスワードは6文字以上で入力してください。");
+        try {
+            await createUserWithEmailAndPassword(auth, email, password);
+        } catch (error) {
+            if (error.code === 'auth/email-already-in-use') alert("このメールアドレスは既に登録されています。");
+            else alert("新規登録に失敗しました。(" + error.message + ")");
+        }
+    };
+
+    window.signOutUser = async () => {
+        try { await signOut(auth); window.location.reload(); } catch (error) {}
+    };
+
     // ==========================================
-    // タブ・UI制御
+    // グローバル・スロット制御 & タブ・UI
     // ==========================================
-    function switchTab(tabName) {
+    window.changeGlobalSlot = (slotVal) => {
+        appSettings.currentSlot = parseInt(slotVal);
+        window.saveUserDataToCloud();
+        
+        updateSlotDisplays();
+        
+        // 現在のタブを再描画
+        window.switchTab(currentActiveTab);
+    };
+    
+    function updateSlotDisplays() {
+        const displays = document.querySelectorAll('.slot-display-text');
+        displays.forEach(el => el.innerText = appSettings.currentSlot);
+    }
+
+    window.switchTab = (tabName) => {
       currentActiveTab = tabName;
       ['training', 'quiz', 'history', 'analysis', 'dictionary', 'settings'].forEach(name => {
           document.getElementById('view-' + name).classList.add('hidden');
@@ -339,35 +620,40 @@
       document.getElementById('view-' + tabName).classList.remove('hidden');
       document.getElementById('nav-' + tabName).className = "px-4 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-500 transition";
 
-      if(tabName === 'analysis') renderHeatmap(currentHeatmapPos); 
-      if(tabName === 'dictionary') renderDictTable('noun');
-      if(tabName === 'history') { renderHistoryTraining(); renderHistoryQuiz(); renderHistoryMissed(); }
+      if(tabName === 'training') updateTrainingDescription(); 
+      if(tabName === 'quiz') updateQuizDescription();
+      if(tabName === 'analysis') window.renderHeatmap(currentHeatmapPos); 
+      if(tabName === 'dictionary') window.renderDictTable('noun');
+      if(tabName === 'history') window.renderAllHistory();
       
       if(tabName !== 'training') resetTrainingState();
       if(tabName !== 'quiz') resetQuizState();
-    }
+    };
 
-    function switchHistoryTab(subTabName) {
+    window.switchHistoryTab = (subTabName) => {
         ['training', 'quiz', 'missed'].forEach(name => {
             document.getElementById('hcontent-' + name).classList.add('hidden');
             document.getElementById('htab-' + name).className = "px-4 py-2 font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-200";
         });
         document.getElementById('hcontent-' + subTabName).classList.remove('hidden');
         document.getElementById('htab-' + subTabName).className = "px-4 py-2 font-bold text-blue-400 border-b-2 border-blue-400";
-    }
+    };
 
     // ==========================================
     // 設定
     // ==========================================
     function initSettingsUI() {
+        document.getElementById('setting-training-mode').value = appSettings.trainingMode;
         document.getElementById('setting-pair-count').value = appSettings.pairCount;
-        updatePairCountDisplay(appSettings.pairCount);
+        window.updatePairCountDisplay(appSettings.pairCount);
         document.getElementById('setting-restrict-n').checked = appSettings.restrictN;
         generatePosSelectors();
     }
-    function updatePairCountDisplay(val) {
+    
+    window.updatePairCountDisplay = (val) => {
         document.getElementById('pair-count-display').innerText = val; appSettings.pairCount = parseInt(val); generatePosSelectors();
-    }
+    };
+    
     function generatePosSelectors() {
         const container = document.getElementById('pos-sequence-container'); container.innerHTML = '';
         while(appSettings.posSequence.length < appSettings.pairCount) appSettings.posSequence.push('noun');
@@ -383,17 +669,40 @@
             select.addEventListener('change', (e) => appSettings.posSequence[i] = e.target.value); container.appendChild(select);
         }
     }
-    function saveSettings() {
-        appSettings.restrictN = document.getElementById('setting-restrict-n').checked; updateTrainingDescription(); alert('設定を保存しました。');
-    }
+    
+    window.saveSettings = () => {
+        appSettings.restrictN = document.getElementById('setting-restrict-n').checked; 
+        updateTrainingDescription(); 
+        window.saveUserDataToCloud().then(() => {
+            alert('設定を保存し、クラウドに同期しました。');
+        });
+    };
+    
     function updateTrainingDescription() {
+        document.getElementById('train-mode-display').innerText = appSettings.trainingMode === 'random' ? '完全ランダム' : '苦手集中';
         const posNames = { noun: '名詞', verb: '動詞', adj: '形容詞' };
         document.getElementById('training-desc').innerHTML = `${appSettings.posSequence.map(p => posNames[p]).join(' → ')}<br>${appSettings.pairCount}つのレターペアから瞬時に情景をイメージせよ。`;
     }
-    function getRandomKey(obj, allowN = true) {
+    
+    function updateQuizDescription() {
+        document.getElementById('quiz-mode-display').innerText = appSettings.trainingMode === 'random' ? '完全ランダム' : '苦手集中';
+    }
+    
+    function getRandomKey(obj, allowN = true, dictIndex = 1, posCategory = 'noun') {
       const keys = Object.keys(obj); if(keys.length === 0) return null;
       let filteredKeys = keys; if (!allowN) filteredKeys = keys.filter(k => !k.endsWith('ん'));
       if (filteredKeys.length === 0) return keys[Math.floor(Math.random() * keys.length)];
+      
+      if (appSettings.trainingMode === 'weak') {
+          let weakKeys = filteredKeys.filter(k => {
+              const s = stats[dictIndex][posCategory][k];
+              if (!s) return false;
+              return (s.missCount > 0) || (s.count > 0 && (s.totalTime / s.count) > 0.75) || (s.slowCount > 0);
+          });
+          if (weakKeys.length > 0 && Math.random() < 0.8) {
+              return weakKeys[Math.floor(Math.random() * weakKeys.length)];
+          }
+      }
       return filteredKeys[Math.floor(Math.random() * filteredKeys.length)];
     }
 
@@ -405,18 +714,25 @@
         document.getElementById('btn-completed').classList.remove('hidden'); document.getElementById('eval-buttons').classList.add('hidden');
         isTrainingActive = false; isWaitingEvaluation = false;
     }
-    function startTrainingSession() {
+    
+    window.startTrainingSession = () => {
       document.getElementById('train-start-screen').classList.add('hidden'); document.getElementById('train-active-screen').classList.remove('hidden'); nextQuestion();
-    }
+    };
+    
     function nextQuestion() {
       isTrainingActive = true; isWaitingEvaluation = false; document.getElementById('btn-completed').classList.remove('hidden'); document.getElementById('eval-buttons').classList.add('hidden');
       const grid = document.getElementById('training-grid'); grid.innerHTML = ''; currentSessionData = [];
       grid.className = `grid grid-cols-${Math.min(appSettings.pairCount, 4)} gap-4 w-full mb-8`;
 
+      const dictIndex = appSettings.currentSlot;
+      const targetDict = dictionaries[dictIndex];
+
       for (let i = 0; i < appSettings.pairCount; i++) {
           const pos = appSettings.posSequence[i]; let allowN = appSettings.restrictN ? (i === appSettings.pairCount - 1) : true;
-          const pair = getRandomKey(dictionary[pos], allowN) || 'あか';
-          currentSessionData.push({ pos: pos, pair: pair, failed: false, word: dictionary[pos][pair] || '未登録' });
+          
+          const pair = getRandomKey(targetDict[pos], allowN, dictIndex, pos) || '--';
+          currentSessionData.push({ pos: pos, pair: pair, failed: false, word: targetDict[pos][pair] || '未登録' });
+          
           const itemDiv = document.createElement('div'); itemDiv.className = "flex flex-col items-center";
           const colorClass = {noun: 'blue', verb: 'pink', adj: 'teal'}[pos];
           itemDiv.innerHTML = `<span class="text-xs text-slate-400 mb-1">${{noun: '名詞', verb: '動詞', adj: '形容詞'}[pos]}</span>
@@ -426,10 +742,12 @@
       }
       startTime = performance.now(); timerInterval = requestAnimationFrame(updateTimer);
     }
+    
     function updateTimer(timestamp) {
       if(!startTime) return; document.getElementById('timer-display').innerText = ((timestamp - startTime) / 1000).toFixed(3); timerInterval = requestAnimationFrame(updateTimer);
     }
-    function stopTimerAndShowAnswer() {
+    
+    window.stopTimerAndShowAnswer = () => {
       if(!isTrainingActive || isWaitingEvaluation) return; cancelAnimationFrame(timerInterval); finalTime = (performance.now() - startTime) / 1000;
       document.getElementById('timer-display').innerText = finalTime.toFixed(3);
       document.getElementById('btn-completed').classList.add('hidden'); document.getElementById('eval-buttons').classList.remove('hidden'); isWaitingEvaluation = true;
@@ -437,59 +755,74 @@
           const ansBox = document.getElementById(`ans-box-${i}`);
           ansBox.innerHTML = `<span>${currentSessionData[i].word}</span><i id="fail-icon-${i}" class="fa-solid fa-xmark text-red-500 hidden mt-1"></i>`; ansBox.classList.remove('opacity-0');
       }
-    }
-    function toggleFailed(index) {
+    };
+    
+    window.toggleFailed = (index) => {
         if (!isWaitingEvaluation) return; currentSessionData[index].failed = !currentSessionData[index].failed;
         const ansBox = document.getElementById(`ans-box-${index}`); const span = ansBox.querySelector('span');
         const icon = document.getElementById(`fail-icon-${index}`); const pairBox = document.getElementById(`pair-box-${index}`);
         if (currentSessionData[index].failed) { span.classList.add('failed-item'); icon.classList.remove('hidden'); pairBox.classList.add('border-red-500', 'text-red-400');
         } else { span.classList.remove('failed-item'); icon.classList.add('hidden'); pairBox.classList.remove('border-red-500', 'text-red-400'); }
-    }
-    function recordResult(evalResult) {
+    };
+    
+    window.recordResult = (evalResult) => {
       if(!isWaitingEvaluation) return; const timePerPair = finalTime / appSettings.pairCount; let hasMisses = false;
+      const dictIndex = appSettings.currentSlot;
+      
       for (let i = 0; i < currentSessionData.length; i++) {
-          const data = currentSessionData[i]; const posStats = stats[data.pos];
+          const data = currentSessionData[i]; const posStats = stats[dictIndex][data.pos];
           if (!posStats[data.pair]) posStats[data.pair] = { count: 0, totalTime: 0, missCount: 0, slowCount: 0 };
           posStats[data.pair].count++; posStats[data.pair].totalTime += timePerPair;
+          
           if (data.failed || evalResult === 'miss') {
               posStats[data.pair].missCount++; hasMisses = true;
-              if(!missedWords[data.pos].includes(data.pair)) missedWords[data.pos].push(data.pair);
+              if(!missedWords[dictIndex][data.pos].includes(data.pair)) missedWords[dictIndex][data.pos].push(data.pair);
           } else if (evalResult === 'slow') { posStats[data.pair].slowCount++; }
       }
       let eval_display = evalResult === 'perfect' ? '<span class="text-green-400 font-bold">Perfect</span>' : evalResult === 'slow' ? '<span class="text-yellow-400 font-bold">Slow</span>' : '<span class="text-red-400 font-bold">Miss</span>';
       if(evalResult !== 'miss' && hasMisses) eval_display += ' <span class="text-red-400 text-xs">(個別Miss)</span>';
-      historyTraining.unshift({
-          id: historyTraining.length + 1, pairs_str: currentSessionData.map(d => d.pair).join(', '),
+      
+      historyTraining[dictIndex].unshift({
+          id: historyTraining[dictIndex].length + 1, 
+          pairs_str: currentSessionData.map(d => d.pair).join(', '),
           words_str: currentSessionData.map(d => `<span class="${d.failed ? 'text-red-400 line-through' : ''}">${d.word}</span>`).join(', '),
           time: finalTime.toFixed(3), eval_str: eval_display
       });
+      
+      window.saveUserDataToCloud(); 
       nextQuestion();
-    }
+    };
 
     // ==========================================
     // Quiz ロジック
     // ==========================================
-    function resetQuizState() {
+    window.resetQuizState = () => {
         clearInterval(quizTimerInterval); clearInterval(quizCountdownTimer);
         ['start', 'memorize', 'waiting', 'test', 'result'].forEach(s => { document.getElementById('quiz-' + s + '-screen').classList.add('hidden'); });
         document.getElementById('quiz-start-screen').classList.remove('hidden'); quizState = 'idle';
-    }
-    function startQuizSession() {
+    };
+    
+    window.startQuizSession = () => {
         quizState = 'memorizing'; document.getElementById('quiz-start-screen').classList.add('hidden'); document.getElementById('quiz-memorize-screen').classList.remove('hidden');
         const grid = document.getElementById('quiz-grid'); grid.innerHTML = ''; quizSessionData = [];
         grid.className = `flex justify-center flex-wrap gap-4 w-full mb-12 grid-cols-${Math.min(appSettings.pairCount, 4)}`;
+        
+        const dictIndex = appSettings.currentSlot;
+        const targetDict = dictionaries[dictIndex];
+
         for (let i = 0; i < appSettings.pairCount; i++) {
             const pos = appSettings.posSequence[i]; let allowN = appSettings.restrictN ? (i === appSettings.pairCount - 1) : true;
-            const pair = getRandomKey(dictionary[pos], allowN) || 'あか';
-            quizSessionData.push({ pos: pos, pair: pair, correct_word: dictionary[pos][pair] || '' });
+            const pair = getRandomKey(targetDict[pos], allowN, dictIndex, pos) || '--';
+            quizSessionData.push({ pos: pos, pair: pair, correct_word: targetDict[pos][pair] || '' });
             const itemDiv = document.createElement('div'); itemDiv.className = "flex flex-col items-center";
             itemDiv.innerHTML = `<span class="text-xs text-slate-400 mb-1">${{noun: '名詞', verb: '動詞', adj: '形容詞'}[pos]}</span><div class="text-5xl font-bold bg-slate-800 p-6 rounded-lg border border-slate-600 shadow-inner">${pair}</div>`;
             grid.appendChild(itemDiv);
         }
         quizStartTime = performance.now();
         quizTimerInterval = setInterval(() => { document.getElementById('quiz-timer-display').innerText = ((performance.now() - quizStartTime) / 1000).toFixed(3); }, 50);
-    }
-    function stopQuizMemorize() {
+    };
+    
+    window.stopQuizMemorize = () => {
         if (quizState !== 'memorizing') return; clearInterval(quizTimerInterval); quizMemTime = (performance.now() - quizStartTime) / 1000;
         quizState = 'waiting'; document.getElementById('quiz-memorize-screen').classList.add('hidden'); document.getElementById('quiz-waiting-screen').classList.remove('hidden');
         let count = 10; document.getElementById('quiz-countdown-display').innerText = count;
@@ -497,9 +830,8 @@
             count--; document.getElementById('quiz-countdown-display').innerText = count;
             if (count <= 0) { clearInterval(quizCountdownTimer); startQuizTest(); }
         }, 1000);
-    }
+    };
     
-    // ▼ フェーズ3: レターペアを隠して入力を求めるよう変更 ▼
     function startQuizTest() {
         quizState = 'testing'; document.getElementById('quiz-waiting-screen').classList.add('hidden'); document.getElementById('quiz-test-screen').classList.remove('hidden');
         const grid = document.getElementById('quiz-input-grid'); grid.innerHTML = '';
@@ -518,19 +850,18 @@
         }
         setTimeout(() => { document.getElementById('quiz-input-0').focus(); }, 100);
     }
-
-    // ▼ 結果の判定ロジックを「単語」ではなく「レターペア」との比較に変更 ▼
-    function submitQuizTest() {
+    
+    window.submitQuizTest = () => {
         if(quizState !== 'testing') return; quizState = 'result';
         document.getElementById('quiz-test-screen').classList.add('hidden'); document.getElementById('quiz-result-screen').classList.remove('hidden');
         const grid = document.getElementById('quiz-result-grid'); grid.innerHTML = ''; let correctCount = 0;
+        
         for (let i = 0; i < quizSessionData.length; i++) {
             const data = quizSessionData[i]; 
             const inputVal = document.getElementById(`quiz-input-${i}`).value.trim(); 
             data.input_pair = inputVal;
             const posLabel = {noun: '名詞', verb: '動詞', adj: '形容詞'}[data.pos];
             
-            // 完全一致で正解とする
             const isCorrect = (inputVal !== '' && inputVal === data.pair); 
             if(isCorrect) correctCount++;
             
@@ -547,36 +878,47 @@
                 </div>`;
             grid.appendChild(div);
         }
+        
         const acc = Math.round((correctCount / appSettings.pairCount) * 100);
         document.getElementById('quiz-result-title').innerText = `Result: ${correctCount}/${appSettings.pairCount} (${acc}%)`;
         
-        historyQuiz.unshift({
-            id: historyQuiz.length + 1, 
+        const dictIndex = appSettings.currentSlot;
+        historyQuiz[dictIndex].unshift({
+            id: historyQuiz[dictIndex].length + 1, 
             pairs_str: quizSessionData.map(d => `${d.pair}(${d.correct_word})`).join(', '),
             input_str: quizSessionData.map(d => `<span class="${(d.pair === d.input_pair && d.input_pair !== '') ? 'text-green-400' : 'text-red-400 font-bold'}">${d.input_pair || '-'}</span>`).join(', '),
             time: quizMemTime.toFixed(3), 
             acc_str: `<span class="${acc===100 ? 'text-green-400' : 'text-yellow-400'}">${acc}%</span>`
         });
-    }
+        
+        window.saveUserDataToCloud();
+    };
 
     // ==========================================
     // History 描画
     // ==========================================
+    window.renderAllHistory = () => {
+        renderHistoryTraining();
+        renderHistoryQuiz();
+        renderHistoryMissed();
+    }
+    
     function renderHistoryTraining() {
         const tbody = document.getElementById('tbody-history-training'); tbody.innerHTML = '';
-        if(historyTraining.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">履歴がありません</td></tr>'; return; }
-        historyTraining.forEach(h => {
+        const targetHist = historyTraining[appSettings.currentSlot];
+        if(targetHist.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">履歴がありません</td></tr>'; return; }
+        targetHist.forEach(h => {
             const tr = document.createElement('tr'); tr.className = "border-b border-slate-700/50 hover:bg-slate-700/30";
             tr.innerHTML = `<td class="px-4 py-3">${h.id}</td><td class="px-4 py-3 font-bold">${h.pairs_str}</td><td class="px-4 py-3">${h.words_str}</td><td class="px-4 py-3 text-teal-300">${h.time}s</td><td class="px-4 py-3">${h.eval_str}</td>`;
             tbody.appendChild(tr);
         });
     }
     
-    // ▼ Quiz履歴のテーブル描画ロジックの変更 ▼
     function renderHistoryQuiz() {
         const tbody = document.getElementById('tbody-history-quiz'); tbody.innerHTML = '';
-        if(historyQuiz.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">履歴がありません</td></tr>'; return; }
-        historyQuiz.forEach(h => {
+        const targetHist = historyQuiz[appSettings.currentSlot];
+        if(targetHist.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">履歴がありません</td></tr>'; return; }
+        targetHist.forEach(h => {
             const tr = document.createElement('tr'); tr.className = "border-b border-slate-700/50 hover:bg-slate-700/30";
             tr.innerHTML = `<td class="px-4 py-3">${h.id}</td><td class="px-4 py-3 text-slate-300">${h.pairs_str}</td><td class="px-4 py-3">${h.input_str}</td><td class="px-4 py-3 text-purple-300">${h.time}s</td><td class="px-4 py-3 font-bold">${h.acc_str}</td>`;
             tbody.appendChild(tr);
@@ -585,10 +927,11 @@
     
     function renderHistoryMissed() {
         ['noun', 'verb', 'adj'].forEach(pos => {
-            const ul = document.getElementById(`list-missed-${pos}`); ul.innerHTML = ''; const words = missedWords[pos];
+            const ul = document.getElementById(`list-missed-${pos}`); ul.innerHTML = ''; 
+            const words = missedWords[appSettings.currentSlot][pos] || [];
             if(words.length === 0) { ul.innerHTML = '<li class="text-slate-500 text-sm list-none">ミス記録なし</li>'; } 
             else { words.forEach(pair => {
-                    const li = document.createElement('li'); li.innerHTML = `<span class="font-bold text-white mr-2">${pair}</span> <span class="text-slate-400">(${dictionary[pos][pair] || '未登録'})</span>`; ul.appendChild(li);
+                    const li = document.createElement('li'); li.innerHTML = `<span class="font-bold text-white mr-2">${pair}</span> <span class="text-slate-400">(${dictionaries[appSettings.currentSlot][pos][pair] || '未登録'})</span>`; ul.appendChild(li);
             }); }
         });
     }
@@ -598,25 +941,25 @@
     // ==========================================
     function setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
-                if(currentActiveTab === 'quiz' && quizState === 'testing' && e.code === 'Enter') submitQuizTest(); return;
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) && e.target.type !== 'checkbox') {
+                if(currentActiveTab === 'quiz' && quizState === 'testing' && e.code === 'Enter') window.submitQuizTest(); return;
             }
             if (currentActiveTab === 'training') {
-                if (isTrainingActive && !isWaitingEvaluation && e.code === 'Space') { e.preventDefault(); stopTimerAndShowAnswer(); } 
+                if (isTrainingActive && !isWaitingEvaluation && e.code === 'Space') { e.preventDefault(); window.stopTimerAndShowAnswer(); } 
                 else if (isTrainingActive && isWaitingEvaluation) {
-                    if (e.code === 'ArrowLeft') { e.preventDefault(); recordResult('miss'); }
-                    else if (e.code === 'ArrowDown') { e.preventDefault(); recordResult('slow'); }
-                    else if (e.code === 'ArrowRight') { e.preventDefault(); recordResult('perfect'); }
-                    const keyNum = parseInt(e.key); if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= appSettings.pairCount) toggleFailed(keyNum - 1);
+                    if (e.code === 'ArrowLeft') { e.preventDefault(); window.recordResult('miss'); }
+                    else if (e.code === 'ArrowDown') { e.preventDefault(); window.recordResult('slow'); }
+                    else if (e.code === 'ArrowRight') { e.preventDefault(); window.recordResult('perfect'); }
+                    const keyNum = parseInt(e.key); if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= appSettings.pairCount) window.toggleFailed(keyNum - 1);
                 } 
-                else if (!isTrainingActive && e.code === 'Space') { e.preventDefault(); startTrainingSession(); }
+                else if (!isTrainingActive && e.code === 'Space') { e.preventDefault(); window.startTrainingSession(); }
             } 
             else if (currentActiveTab === 'quiz') {
                 if (e.code === 'Space') {
                     e.preventDefault();
-                    if (quizState === 'idle') startQuizSession();
-                    else if (quizState === 'memorizing') stopQuizMemorize();
-                    else if (quizState === 'result') resetQuizState();
+                    if (quizState === 'idle') window.startQuizSession();
+                    else if (quizState === 'memorizing') window.stopQuizMemorize();
+                    else if (quizState === 'result') window.resetQuizState();
                 }
             }
         });
@@ -625,17 +968,22 @@
     // ==========================================
     // Analysis & Dictionary
     // ==========================================
-    let charsRow = ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'け', 'こ'];
-    let charsCol = ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'け', 'こ', 'ん'];
-    let currentHeatmapPos = 'noun';
-    function renderHeatmap(posCategory) {
+    let charsRow = ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'け', 'こ', 'さ', 'し', 'す', 'せ', 'そ', 'た', 'ち', 'つ', 'て', 'と', 'な', 'に', 'ぬ', 'ね', 'の', 'は', 'ひ', 'ふ', 'へ', 'ほ', 'ま', 'み', 'む', 'め', 'も', 'や', 'ゆ', 'よ', 'ら', 'り', 'る', 'れ', 'ろ', 'わ', 'を', 'ん'];
+    let charsCol = [...charsRow, 'ん'];
+    
+    window.renderHeatmap = (posCategory) => {
       currentHeatmapPos = posCategory;
       ['noun', 'verb', 'adj'].forEach(cat => { document.getElementById('hm-tab-' + cat).className = (cat === posCategory) ? "px-4 py-2 font-bold text-blue-400 border-b-2 border-blue-400" : "px-4 py-2 font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-200"; });
       const container = document.getElementById('heatmap-container'); container.innerHTML = '';
-      const posStats = stats[posCategory]; const posDict = dictionary[posCategory];
+      
+      const posStats = stats[appSettings.currentSlot][posCategory] || {}; 
+      const posDict = dictionaries[appSettings.currentSlot][posCategory] || {};
+      
       let allPairs = Object.keys(posDict); let rowSet = new Set(); let colSet = new Set();
       allPairs.forEach(p => { if(p.length >= 2) { rowSet.add(p[0]); colSet.add(p[1]); } });
-      let rChars = rowSet.size > 0 ? Array.from(rowSet).sort() : charsRow; let cChars = colSet.size > 0 ? Array.from(colSet).sort() : charsCol;
+      let rChars = rowSet.size > 0 ? Array.from(rowSet).sort() : ['あ','い','う','え','お']; 
+      let cChars = colSet.size > 0 ? Array.from(colSet).sort() : ['あ','い','う','え','お'];
+      
       const table = document.createElement('table'); table.className = "border-collapse border-spacing-1";
       const trHead = document.createElement('tr'); trHead.appendChild(document.createElement('th'));
       cChars.forEach(c => { const th = document.createElement('th'); th.className = "p-2 text-slate-400 font-normal"; th.innerText = c; trHead.appendChild(th); });
@@ -649,27 +997,102 @@
           if (stat && stat.count > 0) {
             const avgTime = stat.totalTime / stat.count; const missRate = stat.missCount / stat.count; const slowRate = stat.slowCount / stat.count;
             if (missRate > 0.3) cellDiv.className = "heatmap-cell color-miss"; else if (avgTime >= 0.75 || slowRate > 0.3) cellDiv.className = "heatmap-cell color-slow"; else if (avgTime < 0.375) cellDiv.className = "heatmap-cell color-excellent"; else cellDiv.className = "heatmap-cell color-good";
-            cellDiv.title = `ペア: ${pair}\n単語: ${posDict[pair] || '-'}\n平均タイム(1要素換算): ${(avgTime).toFixed(2)}秒\nプレイ回数: ${stat.count}\nミス: ${stat.missCount}`;
-          } else { cellDiv.title = `ペア: ${pair}\n単語: ${posDict[pair] || '-'}\n未プレイ`; }
+            cellDiv.title = `ペア: ${pair}
+単語: ${posDict[pair] || '-'}
+平均タイム(1要素換算): ${(avgTime).toFixed(2)}秒
+プレイ回数: ${stat.count}
+ミス: ${stat.missCount}`;
+          } else { cellDiv.title = `ペア: ${pair}
+単語: ${posDict[pair] || '-'}
+未プレイ`; }
           td.appendChild(cellDiv); tr.appendChild(td);
         }); table.appendChild(tr);
       }); container.appendChild(table);
-    }
+    };
 
-    function handleFileUpload(e) {
+    // Dictionary Table Rendering with Editable Cells
+    window.renderDictTable = (posCategory) => {
+      ['noun', 'verb', 'adj'].forEach(cat => { document.getElementById('tab-' + cat).className = (cat === posCategory) ? "px-4 py-2 font-bold text-blue-400 border-b-2 border-blue-400" : "px-4 py-2 font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-200"; });
+      const table = document.getElementById('dict-table'); table.innerHTML = ''; 
+      const dictData = dictionaries[appSettings.currentSlot][posCategory] || {};
+      
+      let rowSet = new Set(); let colSet = new Set();
+      Object.keys(dictData).forEach(p => { if(p.length >= 2) { rowSet.add(p[0]); colSet.add(p[1]); } });
+      
+      // データがない場合は「あ〜こ」の枠を作る
+      let rChars = rowSet.size > 0 ? Array.from(rowSet).sort() : ['あ','い','う','え','お','か','き','く','け','こ']; 
+      let cChars = colSet.size > 0 ? Array.from(colSet).sort() : ['あ','い','う','え','お','か','き','く','け','こ','ん'];
+      
+      const thead = document.createElement('thead'); const trHead = document.createElement('tr'); trHead.className = "bg-slate-700/50"; trHead.appendChild(document.createElement('th'));
+      cChars.forEach(c => { const th = document.createElement('th'); th.className = "px-4 py-3 font-medium text-slate-300"; th.innerText = c; trHead.appendChild(th); });
+      thead.appendChild(trHead); table.appendChild(thead); const tbody = document.createElement('tbody');
+      
+      rChars.forEach(r => {
+        const tr = document.createElement('tr'); tr.className = "border-b border-slate-700/50 hover:bg-slate-700/30";
+        const thRow = document.createElement('th'); thRow.className = "px-4 py-3 font-medium text-slate-300 bg-slate-700/20"; thRow.innerText = r; tr.appendChild(thRow);
+        cChars.forEach(c => {
+          const td = document.createElement('td'); 
+          td.className = "px-4 py-3 border border-slate-700 focus:bg-slate-600 outline-none transition-colors cursor-text min-w-[80px]"; 
+          td.contentEditable = true;
+          const pair = r + c;
+          const word = dictData[pair] || '';
+          td.innerText = word; 
+          td.setAttribute('placeholder', '-');
+          if(word === '') td.classList.add('text-slate-400');
+          
+          td.onfocus = function() { this.classList.remove('text-slate-400'); }
+          td.onblur = function() {
+              const newWord = this.innerText.trim();
+              if (newWord === '') {
+                  this.classList.add('text-slate-400');
+                  delete dictionaries[appSettings.currentSlot][posCategory][pair];
+              } else {
+                  dictionaries[appSettings.currentSlot][posCategory][pair] = newWord;
+              }
+              // 自動保存を廃止（メモリにのみ保存）
+          };
+          tr.appendChild(td);
+        }); tbody.appendChild(tr);
+      }); table.appendChild(tbody);
+    };
+
+    window.saveDictionary = async () => {
+        await window.saveUserDataToCloud();
+        alert('辞書の変更をクラウドに保存しました！');
+    };
+
+    window.handleFileUpload = (e) => {
       const file = e.target.files[0]; if (!file) return; const reader = new FileReader();
       reader.onload = function(e) {
         try {
           const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'});
-          const sheetNames = workbook.SheetNames; dictionary = { noun: {}, verb: {}, adj: {} };
-          if (sheetNames.length >= 1) parseSheet(workbook.Sheets[sheetNames[0]], 'noun');
-          if (sheetNames.length >= 2) parseSheet(workbook.Sheets[sheetNames[1]], 'verb');
-          if (sheetNames.length >= 3) parseSheet(workbook.Sheets[sheetNames[2]], 'adj');
-          alert('辞書データを正常にインポートしました！'); renderDictTable('noun'); if (currentHeatmapPos) renderHeatmap(currentHeatmapPos); 
+          const sheetNames = workbook.SheetNames; 
+          
+          // --- 該当スロットのデータを完全にリセット ---
+          let slot = appSettings.currentSlot;
+          dictionaries[slot] = { noun: {}, verb: {}, adj: {} }; 
+          stats[slot] = { noun: {}, verb: {}, adj: {} };
+          missedWords[slot] = { noun: [], verb: [], adj: [] };
+          historyTraining[slot] = [];
+          historyQuiz[slot] = [];
+          // ------------------------------------------
+
+          if (sheetNames.length >= 1) parseSheet(workbook.Sheets[sheetNames[0]], 'noun', slot);
+          if (sheetNames.length >= 2) parseSheet(workbook.Sheets[sheetNames[1]], 'verb', slot);
+          if (sheetNames.length >= 3) parseSheet(workbook.Sheets[sheetNames[2]], 'adj', slot);
+          
+          window.saveUserDataToCloud().then(() => {
+              alert(`スロット ${slot} に辞書データをインポートし、このスロットの過去履歴を完全にリセットしました！`); 
+              window.renderDictTable('noun'); 
+              if (currentActiveTab === 'analysis') window.renderHeatmap(currentHeatmapPos); 
+              if (currentActiveTab === 'history') window.renderAllHistory();
+          });
         } catch (error) { alert('ファイルの読み込みに失敗しました。'); console.error(error); }
       }; reader.readAsArrayBuffer(file);
-    }
-    function parseSheet(sheet, posCategory) {
+      e.target.value = ''; // 連続インポート対応
+    };
+    
+    function parseSheet(sheet, posCategory, dictIndex) {
       const json = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: ""});
       if (!json || json.length < 2) return; const colHeaders = json[0];
       for (let i = 1; i < json.length; i++) {
@@ -677,28 +1100,9 @@
         const rowHeader = String(row[0]).trim(); if (!rowHeader) continue;
         for (let j = 1; j < row.length; j++) {
           const colHeader = String(colHeaders[j]).trim(); const word = String(row[j]).trim();
-          if (colHeader && word) dictionary[posCategory][rowHeader + colHeader] = word;
+          if (colHeader && word) dictionaries[dictIndex][posCategory][rowHeader + colHeader] = word;
         }
       }
-    }
-    function renderDictTable(posCategory) {
-      ['noun', 'verb', 'adj'].forEach(cat => { document.getElementById('tab-' + cat).className = (cat === posCategory) ? "px-4 py-2 font-bold text-blue-400 border-b-2 border-blue-400" : "px-4 py-2 font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-200"; });
-      const table = document.getElementById('dict-table'); table.innerHTML = ''; const dictData = dictionary[posCategory];
-      let rowSet = new Set(); let colSet = new Set();
-      Object.keys(dictData).forEach(p => { if(p.length >= 2) { rowSet.add(p[0]); colSet.add(p[1]); } });
-      let rChars = Array.from(rowSet).sort(); let cChars = Array.from(colSet).sort();
-      if(rChars.length === 0) { table.innerHTML = '<tr><td class="p-4 text-slate-500">データがありません</td></tr>'; return; }
-      const thead = document.createElement('thead'); const trHead = document.createElement('tr'); trHead.className = "bg-slate-700/50"; trHead.appendChild(document.createElement('th'));
-      cChars.forEach(c => { const th = document.createElement('th'); th.className = "px-4 py-3 font-medium text-slate-300"; th.innerText = c; trHead.appendChild(th); });
-      thead.appendChild(trHead); table.appendChild(thead); const tbody = document.createElement('tbody');
-      rChars.forEach(r => {
-        const tr = document.createElement('tr'); tr.className = "border-b border-slate-700/50 hover:bg-slate-700/30";
-        const thRow = document.createElement('th'); thRow.className = "px-4 py-3 font-medium text-slate-300 bg-slate-700/20"; thRow.innerText = r; tr.appendChild(thRow);
-        cChars.forEach(c => {
-          const td = document.createElement('td'); td.className = "px-4 py-3"; const word = dictData[r + c] || '-';
-          td.innerText = word; if(word === '-') td.classList.add('text-slate-600'); tr.appendChild(td);
-        }); tbody.appendChild(tr);
-      }); table.appendChild(tbody);
     }
   </script>
 </body>
