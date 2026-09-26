@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ImageChain</title>
+  <title>KOIKE LATTER PAIR TRAINING ver1</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -65,7 +65,7 @@
       </div>
       
       <div id="auth-login" class="hidden text-center p-8 bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl max-w-md w-full">
-          <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 mb-4"><i class="fa-solid fa-link"></i> ImageChain</h1>
+          <h1 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 mb-4">KOIKE LATTER PAIR TRAINING ver1</h1>
           <p class="text-slate-400 mb-6 text-sm">アカウントにログインして、辞書データと学習記録をクラウドに同期しましょう。</p>
           
           <div class="flex flex-col gap-3 mb-6">
@@ -87,8 +87,8 @@
   <!-- Navigation -->
   <!-- ============================================== -->
   <nav class="bg-slate-800 p-4 shadow-lg flex justify-between items-center sticky top-0 z-50 overflow-x-auto whitespace-nowrap">
-    <div class="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 flex items-center gap-2 mr-4">
-      <i class="fa-solid fa-link"></i> ImageChain
+    <div class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 flex items-center gap-2 mr-4">
+      KOIKE LATTER PAIR TRAINING ver1
     </div>
     
     <div class="space-x-2 flex flex-grow">
@@ -434,6 +434,9 @@
     let historyTraining = {}; 
     let historyQuiz = {}; 
     
+    // 履歴の最大保存件数 (クラウド容量制限の回避策)
+    const MAX_HISTORY = 200; 
+    
     // スロットごとの初期化
     for(let i=1; i<=5; i++) {
         dictionaries[i] = { noun: {}, verb: {}, adj: {} };
@@ -539,6 +542,7 @@
             });
         } catch (error) {
             console.error("データ保存エラー:", error);
+            alert("データの同期(保存)に失敗しました。通信環境が不安定か、データ容量が大きすぎる可能性があります。");
         }
     }
 
@@ -782,12 +786,19 @@
       let eval_display = evalResult === 'perfect' ? '<span class="text-green-400 font-bold">Perfect</span>' : evalResult === 'slow' ? '<span class="text-yellow-400 font-bold">Slow</span>' : '<span class="text-red-400 font-bold">Miss</span>';
       if(evalResult !== 'miss' && hasMisses) eval_display += ' <span class="text-red-400 text-xs">(個別Miss)</span>';
       
+      let nextId = historyTraining[dictIndex].length > 0 ? historyTraining[dictIndex][0].id + 1 : 1;
+      
       historyTraining[dictIndex].unshift({
-          id: historyTraining[dictIndex].length + 1, 
+          id: nextId, 
           pairs_str: currentSessionData.map(d => d.pair).join(', '),
           words_str: currentSessionData.map(d => `<span class="${d.failed ? 'text-red-400 line-through' : ''}">${d.word}</span>`).join(', '),
           time: finalTime.toFixed(3), eval_str: eval_display
       });
+      
+      // 履歴の最大数を制限して、Firebaseの容量制限オーバーを防ぐ
+      if (historyTraining[dictIndex].length > MAX_HISTORY) {
+          historyTraining[dictIndex] = historyTraining[dictIndex].slice(0, MAX_HISTORY);
+      }
       
       window.saveUserDataToCloud(); 
       nextQuestion();
@@ -883,13 +894,19 @@
         document.getElementById('quiz-result-title').innerText = `Result: ${correctCount}/${appSettings.pairCount} (${acc}%)`;
         
         const dictIndex = appSettings.currentSlot;
+        let nextId = historyQuiz[dictIndex].length > 0 ? historyQuiz[dictIndex][0].id + 1 : 1;
+        
         historyQuiz[dictIndex].unshift({
-            id: historyQuiz[dictIndex].length + 1, 
+            id: nextId, 
             pairs_str: quizSessionData.map(d => `${d.pair}(${d.correct_word})`).join(', '),
             input_str: quizSessionData.map(d => `<span class="${(d.pair === d.input_pair && d.input_pair !== '') ? 'text-green-400' : 'text-red-400 font-bold'}">${d.input_pair || '-'}</span>`).join(', '),
             time: quizMemTime.toFixed(3), 
             acc_str: `<span class="${acc===100 ? 'text-green-400' : 'text-yellow-400'}">${acc}%</span>`
         });
+        
+        if (historyQuiz[dictIndex].length > MAX_HISTORY) {
+            historyQuiz[dictIndex] = historyQuiz[dictIndex].slice(0, MAX_HISTORY);
+        }
         
         window.saveUserDataToCloud();
     };
@@ -1092,15 +1109,29 @@
       e.target.value = ''; // 連続インポート対応
     };
     
+    // ▼ SheetJS パースの強化版（空白セルでのデータ欠落防止） ▼
     function parseSheet(sheet, posCategory, dictIndex) {
       const json = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: ""});
-      if (!json || json.length < 2) return; const colHeaders = json[0];
+      if (!json || json.length < 2) return; 
+      
+      const colHeaders = json[0] || [];
+      
       for (let i = 1; i < json.length; i++) {
-        const row = json[i]; if (!row || row.length === 0) continue;
-        const rowHeader = String(row[0]).trim(); if (!rowHeader) continue;
-        for (let j = 1; j < row.length; j++) {
-          const colHeader = String(colHeaders[j]).trim(); const word = String(row[j]).trim();
-          if (colHeader && word) dictionaries[dictIndex][posCategory][rowHeader + colHeader] = word;
+        const row = json[i] || []; 
+        const rowHeader = row[0] !== undefined && row[0] !== null ? String(row[0]).trim() : ""; 
+        if (!rowHeader) continue;
+        
+        // ヘッダー行とデータ行の長さの最大値を取ることで、末尾の空白セルによる配列短縮を防ぐ
+        const len = Math.max(colHeaders.length, row.length);
+        
+        for (let j = 1; j < len; j++) {
+          const colHeader = colHeaders[j] !== undefined && colHeaders[j] !== null ? String(colHeaders[j]).trim() : ""; 
+          const word = row[j] !== undefined && row[j] !== null ? String(row[j]).trim() : "";
+          
+          // ヘッダーも単語も存在する場合のみ登録
+          if (colHeader !== "" && word !== "") {
+              dictionaries[dictIndex][posCategory][rowHeader + colHeader] = word;
+          }
         }
       }
     }
