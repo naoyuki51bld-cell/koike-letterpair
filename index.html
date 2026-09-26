@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KOIKE LATTER PAIR TRAINING ver1</title>
+  <title>ImageChain</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -65,7 +65,7 @@
       </div>
       
       <div id="auth-login" class="hidden text-center p-8 bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl max-w-md w-full">
-          <h1 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 mb-4">KOIKE LATTER PAIR TRAINING ver1</h1>
+          <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 mb-4"><i class="fa-solid fa-link"></i> ImageChain</h1>
           <p class="text-slate-400 mb-6 text-sm">アカウントにログインして、辞書データと学習記録をクラウドに同期しましょう。</p>
           
           <div class="flex flex-col gap-3 mb-6">
@@ -87,8 +87,8 @@
   <!-- Navigation -->
   <!-- ============================================== -->
   <nav class="bg-slate-800 p-4 shadow-lg flex justify-between items-center sticky top-0 z-50 overflow-x-auto whitespace-nowrap">
-    <div class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 flex items-center gap-2 mr-4">
-      KOIKE LATTER PAIR TRAINING ver1
+    <div class="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 flex items-center gap-2 mr-4">
+      <i class="fa-solid fa-link"></i> ImageChain
     </div>
     
     <div class="space-x-2 flex flex-grow">
@@ -433,9 +433,16 @@
     let missedWords = {};
     let historyTraining = {}; 
     let historyQuiz = {}; 
+    let headers = {}; 
     
-    // 履歴の最大保存件数 (クラウド容量制限の回避策)
-    const MAX_HISTORY = 200; 
+    // データ保存制限
+    const MAX_HISTORY = 50; 
+    
+    // サニタイズ関数 (Firebaseのキーとして使えない文字を変換)
+    function sanitizeKey(str) {
+        if (!str) return "";
+        return String(str).replace(/[\.\/\[\]~#$]/g, '_');
+    }
     
     // スロットごとの初期化
     for(let i=1; i<=5; i++) {
@@ -444,13 +451,14 @@
         missedWords[i] = { noun: [], verb: [], adj: [] };
         historyTraining[i] = [];
         historyQuiz[i] = [];
+        headers[i] = { noun: {rows:[], cols:[]}, verb: {rows:[], cols:[]}, adj: {rows:[], cols:[]} };
     }
     
     // ダミー初期データ (スロット1のみ)
     dictionaries[1] = {
-      noun: { 'あか':'赤', 'あい':'愛', 'あう':'会う人', 'あき':'秋', 'あく':'悪', 'かあ':'母', 'かい':'貝', 'かう':'カウボーイ', 'かき':'柿', 'かく':'核', 'かん':'缶', 'あん':'餡' },
-      verb: { 'あか':'明かす', 'あい':'愛する', 'あう':'会う', 'あき':'飽きる', 'あく':'開く', 'かあ':'庇う', 'かい':'飼う', 'かう':'買う', 'かき':'掻く', 'かく':'書く', 'かん':'噛む', 'あん':'案じる' },
-      adj: { 'あか':'赤い', 'あい':'愛想いい', 'あう':'危うい', 'あき':'呆れる', 'あく':'あくどい', 'かあ':'可愛い', 'かい':'痒い', 'かう':'香ばしい', 'かき':'活気ある', 'かく':'かくかくした', 'かん':'悲しい', 'あん':'暗澹たる' }
+      noun: { 'あ::か':'赤', 'あ::い':'愛', 'あ::う':'会う人', 'あ::き':'秋', 'あ::く':'悪', 'か::あ':'母', 'か::い':'貝', 'か::う':'カウボーイ', 'か::き':'柿', 'か::く':'核', 'か::ん':'缶', 'あ::ん':'餡' },
+      verb: { 'あ::か':'明かす', 'あ::い':'愛する', 'あ::う':'会う', 'あ::き':'飽きる', 'あ::く':'開く', 'か::あ':'庇う', 'か::い':'飼う', 'か::う':'買う', 'か::き':'掻く', 'か::く':'書く', 'か::ん':'噛む', 'あ::ん':'案じる' },
+      adj: { 'あ::か':'赤い', 'あ::い':'愛想いい', 'あ::う':'危うい', 'あ::き':'呆れる', 'あ::く':'あくどい', 'か::あ':'可愛い', 'か::い':'痒い', 'か::う':'香ばしい', 'か::き':'活気ある', 'か::く':'かくかくした', 'か::ん':'悲しい', 'あ::ん':'暗澹たる' }
     };
 
     let appSettings = { 
@@ -504,18 +512,33 @@
                     } else { historyQuiz = data.historyQuiz; }
                 }
                 
-                // Settings スロットの補正
-                if (data.settings && data.settings.activeDict && !data.settings.currentSlot) {
-                    appSettings.currentSlot = data.settings.activeDict; // 過去バージョン互換
+                if(data.headers) {
+                    headers = data.headers;
+                } else {
+                    for(let i=1; i<=5; i++) {
+                        ['noun', 'verb', 'adj'].forEach(pos => {
+                           let rSet = new Set(); let cSet = new Set();
+                           Object.keys(dictionaries[i][pos]).forEach(k => {
+                               const parts = k.split('::');
+                               if(parts.length === 2) { rSet.add(parts[0]); cSet.add(parts[1]); }
+                           });
+                           headers[i][pos].rows = Array.from(rSet).sort();
+                           headers[i][pos].cols = Array.from(cSet).sort();
+                        });
+                    }
                 }
                 
-                console.log("クラウドからデータをロードしました。");
+                if (data.settings && data.settings.activeDict && !data.settings.currentSlot) {
+                    appSettings.currentSlot = data.settings.activeDict; 
+                }
+                
             } else {
                 await window.saveUserDataToCloud();
             }
             
             // UI連動
             document.getElementById('global-slot-select').value = appSettings.currentSlot;
+            
             updateSlotDisplays();
             initSettingsUI();
             updateTrainingDescription();
@@ -525,24 +548,38 @@
             
         } catch (error) {
             console.error("データ読み込みエラー:", error);
-            alert("データの同期に失敗しました。再読み込みしてください。");
+            alert(`データの同期に失敗しました。
+
+【エラー詳細】
+${error.message}`);
         }
     }
 
     window.saveUserDataToCloud = async () => {
         if (!auth.currentUser) return;
         try {
-            await setDoc(doc(db, "users", auth.currentUser.uid), {
+            // undefined などを排除して完全にシリアライズ
+            const cleanData = JSON.parse(JSON.stringify({
                 dictionaries: dictionaries,
                 stats: stats,
                 settings: appSettings,
                 historyTraining: historyTraining,
                 historyQuiz: historyQuiz,
-                missedWords: missedWords
-            });
+                missedWords: missedWords,
+                headers: headers
+            }));
+            
+            await setDoc(doc(db, "users", auth.currentUser.uid), cleanData);
+            console.log("クラウドへ保存完了");
+            
         } catch (error) {
             console.error("データ保存エラー:", error);
-            alert("データの同期(保存)に失敗しました。通信環境が不安定か、データ容量が大きすぎる可能性があります。");
+            alert(`データの同期(保存)に失敗しました。
+
+【エラー詳細】
+${error.message}
+
+※Firestoreのルール（有効期限）や、データ容量が大きすぎることが原因の可能性があります。`);
         }
     }
 
@@ -694,12 +731,19 @@
     
     function getRandomKey(obj, allowN = true, dictIndex = 1, posCategory = 'noun') {
       const keys = Object.keys(obj); if(keys.length === 0) return null;
-      let filteredKeys = keys; if (!allowN) filteredKeys = keys.filter(k => !k.endsWith('ん'));
+      let filteredKeys = keys; 
+      if (!allowN) {
+          filteredKeys = keys.filter(k => {
+              const dp = k.split('::').join('');
+              return !dp.endsWith('ん');
+          });
+      }
       if (filteredKeys.length === 0) return keys[Math.floor(Math.random() * keys.length)];
       
       if (appSettings.trainingMode === 'weak') {
           let weakKeys = filteredKeys.filter(k => {
-              const s = stats[dictIndex][posCategory][k];
+              const dp = k.split('::').join('');
+              const s = stats[dictIndex][posCategory][dp];
               if (!s) return false;
               return (s.missCount > 0) || (s.count > 0 && (s.totalTime / s.count) > 0.75) || (s.slowCount > 0);
           });
@@ -734,8 +778,13 @@
       for (let i = 0; i < appSettings.pairCount; i++) {
           const pos = appSettings.posSequence[i]; let allowN = appSettings.restrictN ? (i === appSettings.pairCount - 1) : true;
           
-          const pair = getRandomKey(targetDict[pos], allowN, dictIndex, pos) || '--';
-          currentSessionData.push({ pos: pos, pair: pair, failed: false, word: targetDict[pos][pair] || '未登録' });
+          const internalKey = getRandomKey(targetDict[pos], allowN, dictIndex, pos);
+          let pair = '--'; let word = '未登録';
+          if (internalKey) {
+              pair = internalKey.split('::').join('');
+              word = targetDict[pos][internalKey] || '未登録';
+          }
+          currentSessionData.push({ pos: pos, pair: pair, internalKey: internalKey, failed: false, word: word });
           
           const itemDiv = document.createElement('div'); itemDiv.className = "flex flex-col items-center";
           const colorClass = {noun: 'blue', verb: 'pink', adj: 'teal'}[pos];
@@ -795,7 +844,6 @@
           time: finalTime.toFixed(3), eval_str: eval_display
       });
       
-      // 履歴の最大数を制限して、Firebaseの容量制限オーバーを防ぐ
       if (historyTraining[dictIndex].length > MAX_HISTORY) {
           historyTraining[dictIndex] = historyTraining[dictIndex].slice(0, MAX_HISTORY);
       }
@@ -823,8 +871,15 @@
 
         for (let i = 0; i < appSettings.pairCount; i++) {
             const pos = appSettings.posSequence[i]; let allowN = appSettings.restrictN ? (i === appSettings.pairCount - 1) : true;
-            const pair = getRandomKey(targetDict[pos], allowN, dictIndex, pos) || '--';
-            quizSessionData.push({ pos: pos, pair: pair, correct_word: targetDict[pos][pair] || '' });
+            
+            const internalKey = getRandomKey(targetDict[pos], allowN, dictIndex, pos);
+            let pair = '--'; let word = '';
+            if (internalKey) {
+                pair = internalKey.split('::').join('');
+                word = targetDict[pos][internalKey] || '';
+            }
+            quizSessionData.push({ pos: pos, pair: pair, internalKey: internalKey, correct_word: word });
+            
             const itemDiv = document.createElement('div'); itemDiv.className = "flex flex-col items-center";
             itemDiv.innerHTML = `<span class="text-xs text-slate-400 mb-1">${{noun: '名詞', verb: '動詞', adj: '形容詞'}[pos]}</span><div class="text-5xl font-bold bg-slate-800 p-6 rounded-lg border border-slate-600 shadow-inner">${pair}</div>`;
             grid.appendChild(itemDiv);
@@ -922,7 +977,7 @@
     
     function renderHistoryTraining() {
         const tbody = document.getElementById('tbody-history-training'); tbody.innerHTML = '';
-        const targetHist = historyTraining[appSettings.currentSlot];
+        const targetHist = historyTraining[appSettings.currentSlot] || [];
         if(targetHist.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">履歴がありません</td></tr>'; return; }
         targetHist.forEach(h => {
             const tr = document.createElement('tr'); tr.className = "border-b border-slate-700/50 hover:bg-slate-700/30";
@@ -933,7 +988,7 @@
     
     function renderHistoryQuiz() {
         const tbody = document.getElementById('tbody-history-quiz'); tbody.innerHTML = '';
-        const targetHist = historyQuiz[appSettings.currentSlot];
+        const targetHist = historyQuiz[appSettings.currentSlot] || [];
         if(targetHist.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-slate-500">履歴がありません</td></tr>'; return; }
         targetHist.forEach(h => {
             const tr = document.createElement('tr'); tr.className = "border-b border-slate-700/50 hover:bg-slate-700/30";
@@ -947,9 +1002,15 @@
             const ul = document.getElementById(`list-missed-${pos}`); ul.innerHTML = ''; 
             const words = missedWords[appSettings.currentSlot][pos] || [];
             if(words.length === 0) { ul.innerHTML = '<li class="text-slate-500 text-sm list-none">ミス記録なし</li>'; } 
-            else { words.forEach(pair => {
-                    const li = document.createElement('li'); li.innerHTML = `<span class="font-bold text-white mr-2">${pair}</span> <span class="text-slate-400">(${dictionaries[appSettings.currentSlot][pos][pair] || '未登録'})</span>`; ul.appendChild(li);
-            }); }
+            else { 
+                words.forEach(pair => {
+                    let word = '未登録';
+                    const internalKey = Object.keys(dictionaries[appSettings.currentSlot][pos]).find(k => k.split('::').join('') === pair);
+                    if (internalKey) word = dictionaries[appSettings.currentSlot][pos][internalKey];
+                    
+                    const li = document.createElement('li'); li.innerHTML = `<span class="font-bold text-white mr-2">${pair}</span> <span class="text-slate-400">(${word})</span>`; ul.appendChild(li);
+                }); 
+            }
         });
     }
 
@@ -985,8 +1046,6 @@
     // ==========================================
     // Analysis & Dictionary
     // ==========================================
-    let charsRow = ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'け', 'こ', 'さ', 'し', 'す', 'せ', 'そ', 'た', 'ち', 'つ', 'て', 'と', 'な', 'に', 'ぬ', 'ね', 'の', 'は', 'ひ', 'ふ', 'へ', 'ほ', 'ま', 'み', 'む', 'め', 'も', 'や', 'ゆ', 'よ', 'ら', 'り', 'る', 'れ', 'ろ', 'わ', 'を', 'ん'];
-    let charsCol = [...charsRow, 'ん'];
     
     window.renderHeatmap = (posCategory) => {
       currentHeatmapPos = posCategory;
@@ -995,11 +1054,20 @@
       
       const posStats = stats[appSettings.currentSlot][posCategory] || {}; 
       const posDict = dictionaries[appSettings.currentSlot][posCategory] || {};
+      const hdr = headers[appSettings.currentSlot][posCategory];
       
-      let allPairs = Object.keys(posDict); let rowSet = new Set(); let colSet = new Set();
-      allPairs.forEach(p => { if(p.length >= 2) { rowSet.add(p[0]); colSet.add(p[1]); } });
-      let rChars = rowSet.size > 0 ? Array.from(rowSet).sort() : ['あ','い','う','え','お']; 
-      let cChars = colSet.size > 0 ? Array.from(colSet).sort() : ['あ','い','う','え','お'];
+      let rChars = []; let cChars = [];
+      if (hdr && hdr.rows.length > 0 && hdr.cols.length > 0) {
+          rChars = hdr.rows; cChars = hdr.cols;
+      } else {
+          let rowSet = new Set(); let colSet = new Set();
+          Object.keys(posDict).forEach(k => { 
+              const parts = k.split('::'); 
+              if(parts.length === 2) { rowSet.add(parts[0]); colSet.add(parts[1]); }
+          });
+          rChars = rowSet.size > 0 ? Array.from(rowSet).sort() : ['あ','い','う','え','お']; 
+          cChars = colSet.size > 0 ? Array.from(colSet).sort() : ['あ','い','う','え','お'];
+      }
       
       const table = document.createElement('table'); table.className = "border-collapse border-spacing-1";
       const trHead = document.createElement('tr'); trHead.appendChild(document.createElement('th'));
@@ -1007,20 +1075,23 @@
       table.appendChild(trHead);
       rChars.forEach(r => {
         const tr = document.createElement('tr'); const thRow = document.createElement('th');
-        thRow.className = "p-2 text-slate-400 font-normal text-right pr-4"; thRow.innerText = r; tr.appendChild(thRow);
+        thRow.className = "p-2 text-slate-400 font-normal text-right pr-4 whitespace-nowrap"; thRow.innerText = r; tr.appendChild(thRow);
         cChars.forEach(c => {
-          const td = document.createElement('td'); td.className = "p-1"; const pair = r + c; const stat = posStats[pair];
-          const cellDiv = document.createElement('div'); cellDiv.className = "heatmap-cell color-none"; cellDiv.innerText = pair;
+          const td = document.createElement('td'); td.className = "p-1"; 
+          const displayPair = r + c; 
+          const internalKey = sanitizeKey(r) + "::" + sanitizeKey(c);
+          const stat = posStats[displayPair];
+          const cellDiv = document.createElement('div'); cellDiv.className = "heatmap-cell color-none"; cellDiv.innerText = displayPair;
           if (stat && stat.count > 0) {
             const avgTime = stat.totalTime / stat.count; const missRate = stat.missCount / stat.count; const slowRate = stat.slowCount / stat.count;
             if (missRate > 0.3) cellDiv.className = "heatmap-cell color-miss"; else if (avgTime >= 0.75 || slowRate > 0.3) cellDiv.className = "heatmap-cell color-slow"; else if (avgTime < 0.375) cellDiv.className = "heatmap-cell color-excellent"; else cellDiv.className = "heatmap-cell color-good";
-            cellDiv.title = `ペア: ${pair}
-単語: ${posDict[pair] || '-'}
+            cellDiv.title = `ペア: ${displayPair}
+単語: ${posDict[internalKey] || '-'}
 平均タイム(1要素換算): ${(avgTime).toFixed(2)}秒
 プレイ回数: ${stat.count}
 ミス: ${stat.missCount}`;
-          } else { cellDiv.title = `ペア: ${pair}
-単語: ${posDict[pair] || '-'}
+          } else { cellDiv.title = `ペア: ${displayPair}
+単語: ${posDict[internalKey] || '-'}
 未プレイ`; }
           td.appendChild(cellDiv); tr.appendChild(td);
         }); table.appendChild(tr);
@@ -1032,13 +1103,20 @@
       ['noun', 'verb', 'adj'].forEach(cat => { document.getElementById('tab-' + cat).className = (cat === posCategory) ? "px-4 py-2 font-bold text-blue-400 border-b-2 border-blue-400" : "px-4 py-2 font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-200"; });
       const table = document.getElementById('dict-table'); table.innerHTML = ''; 
       const dictData = dictionaries[appSettings.currentSlot][posCategory] || {};
+      const hdr = headers[appSettings.currentSlot][posCategory];
       
-      let rowSet = new Set(); let colSet = new Set();
-      Object.keys(dictData).forEach(p => { if(p.length >= 2) { rowSet.add(p[0]); colSet.add(p[1]); } });
-      
-      // データがない場合は「あ〜こ」の枠を作る
-      let rChars = rowSet.size > 0 ? Array.from(rowSet).sort() : ['あ','い','う','え','お','か','き','く','け','こ']; 
-      let cChars = colSet.size > 0 ? Array.from(colSet).sort() : ['あ','い','う','え','お','か','き','く','け','こ','ん'];
+      let rChars = []; let cChars = [];
+      if (hdr && hdr.rows.length > 0 && hdr.cols.length > 0) {
+          rChars = hdr.rows; cChars = hdr.cols;
+      } else {
+          let rowSet = new Set(); let colSet = new Set();
+          Object.keys(dictData).forEach(k => { 
+              const parts = k.split('::'); 
+              if(parts.length === 2) { rowSet.add(parts[0]); colSet.add(parts[1]); }
+          });
+          rChars = rowSet.size > 0 ? Array.from(rowSet).sort() : ['あ','い','う','え','お','か','き','く','け','こ']; 
+          cChars = colSet.size > 0 ? Array.from(colSet).sort() : ['あ','い','う','え','お','か','き','く','け','こ','ん'];
+      }
       
       const thead = document.createElement('thead'); const trHead = document.createElement('tr'); trHead.className = "bg-slate-700/50"; trHead.appendChild(document.createElement('th'));
       cChars.forEach(c => { const th = document.createElement('th'); th.className = "px-4 py-3 font-medium text-slate-300"; th.innerText = c; trHead.appendChild(th); });
@@ -1046,13 +1124,13 @@
       
       rChars.forEach(r => {
         const tr = document.createElement('tr'); tr.className = "border-b border-slate-700/50 hover:bg-slate-700/30";
-        const thRow = document.createElement('th'); thRow.className = "px-4 py-3 font-medium text-slate-300 bg-slate-700/20"; thRow.innerText = r; tr.appendChild(thRow);
+        const thRow = document.createElement('th'); thRow.className = "px-4 py-3 font-medium text-slate-300 bg-slate-700/20 whitespace-nowrap"; thRow.innerText = r; tr.appendChild(thRow);
         cChars.forEach(c => {
           const td = document.createElement('td'); 
           td.className = "px-4 py-3 border border-slate-700 focus:bg-slate-600 outline-none transition-colors cursor-text min-w-[80px]"; 
           td.contentEditable = true;
-          const pair = r + c;
-          const word = dictData[pair] || '';
+          const internalKey = sanitizeKey(r) + "::" + sanitizeKey(c);
+          const word = dictData[internalKey] || '';
           td.innerText = word; 
           td.setAttribute('placeholder', '-');
           if(word === '') td.classList.add('text-slate-400');
@@ -1062,11 +1140,10 @@
               const newWord = this.innerText.trim();
               if (newWord === '') {
                   this.classList.add('text-slate-400');
-                  delete dictionaries[appSettings.currentSlot][posCategory][pair];
+                  delete dictionaries[appSettings.currentSlot][posCategory][internalKey];
               } else {
-                  dictionaries[appSettings.currentSlot][posCategory][pair] = newWord;
+                  dictionaries[appSettings.currentSlot][posCategory][internalKey] = newWord;
               }
-              // 自動保存を廃止（メモリにのみ保存）
           };
           tr.appendChild(td);
         }); tbody.appendChild(tr);
@@ -1085,14 +1162,13 @@
           const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'});
           const sheetNames = workbook.SheetNames; 
           
-          // --- 該当スロットのデータを完全にリセット ---
           let slot = appSettings.currentSlot;
           dictionaries[slot] = { noun: {}, verb: {}, adj: {} }; 
           stats[slot] = { noun: {}, verb: {}, adj: {} };
           missedWords[slot] = { noun: [], verb: [], adj: [] };
           historyTraining[slot] = [];
           historyQuiz[slot] = [];
-          // ------------------------------------------
+          headers[slot] = { noun: {rows:[], cols:[]}, verb: {rows:[], cols:[]}, adj: {rows:[], cols:[]} };
 
           if (sheetNames.length >= 1) parseSheet(workbook.Sheets[sheetNames[0]], 'noun', slot);
           if (sheetNames.length >= 2) parseSheet(workbook.Sheets[sheetNames[1]], 'verb', slot);
@@ -1109,31 +1185,38 @@
       e.target.value = ''; // 連続インポート対応
     };
     
-    // ▼ SheetJS パースの強化版（空白セルでのデータ欠落防止） ▼
     function parseSheet(sheet, posCategory, dictIndex) {
       const json = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: ""});
       if (!json || json.length < 2) return; 
       
-      const colHeaders = json[0] || [];
+      const colHeadersRaw = json[0] || [];
+      const cols = [];
+      for (let j = 1; j < colHeadersRaw.length; j++) {
+          const ch = colHeadersRaw[j] !== undefined && colHeadersRaw[j] !== null ? String(colHeadersRaw[j]).trim() : "";
+          if (ch) cols.push(ch);
+      }
       
+      const rows = [];
       for (let i = 1; i < json.length; i++) {
         const row = json[i] || []; 
         const rowHeader = row[0] !== undefined && row[0] !== null ? String(row[0]).trim() : ""; 
         if (!rowHeader) continue;
         
-        // ヘッダー行とデータ行の長さの最大値を取ることで、末尾の空白セルによる配列短縮を防ぐ
-        const len = Math.max(colHeaders.length, row.length);
+        rows.push(rowHeader);
         
+        const len = Math.max(colHeadersRaw.length, row.length);
         for (let j = 1; j < len; j++) {
-          const colHeader = colHeaders[j] !== undefined && colHeaders[j] !== null ? String(colHeaders[j]).trim() : ""; 
+          const colHeader = colHeadersRaw[j] !== undefined && colHeadersRaw[j] !== null ? String(colHeadersRaw[j]).trim() : ""; 
           const word = row[j] !== undefined && row[j] !== null ? String(row[j]).trim() : "";
           
-          // ヘッダーも単語も存在する場合のみ登録
           if (colHeader !== "" && word !== "") {
-              dictionaries[dictIndex][posCategory][rowHeader + colHeader] = word;
+              dictionaries[dictIndex][posCategory][sanitizeKey(rowHeader) + "::" + sanitizeKey(colHeader)] = word;
           }
         }
       }
+      
+      headers[dictIndex][posCategory].rows = Array.from(new Set(rows));
+      headers[dictIndex][posCategory].cols = Array.from(new Set(cols));
     }
   </script>
 </body>
