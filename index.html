@@ -409,7 +409,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js";
     import { getAuth, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js";
+    import { initializeFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyAy88Z5MTSaRWLgIiXiccS-mAUmrzdxH0g",
@@ -423,7 +423,10 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app);
+    // 強制的にLong Pollingを使用し、ローカル環境でのオフラインエラーを回避
+    const db = initializeFirestore(app, {
+        experimentalForceLongPolling: true
+    });
 
     // ==========================================
     // データ・ステート管理 (スロット1~5で完全分離)
@@ -538,7 +541,6 @@
             
             // UI連動
             document.getElementById('global-slot-select').value = appSettings.currentSlot;
-            
             updateSlotDisplays();
             initSettingsUI();
             updateTrainingDescription();
@@ -548,10 +550,7 @@
             
         } catch (error) {
             console.error("データ読み込みエラー:", error);
-            alert(`データの同期に失敗しました。
-
-【エラー詳細】
-${error.message}`);
+            alert(`データの同期に失敗しました。\n\n【エラー詳細】\n${error.message}`);
         }
     }
 
@@ -574,12 +573,7 @@ ${error.message}`);
             
         } catch (error) {
             console.error("データ保存エラー:", error);
-            alert(`データの同期(保存)に失敗しました。
-
-【エラー詳細】
-${error.message}
-
-※Firestoreのルール（有効期限）や、データ容量が大きすぎることが原因の可能性があります。`);
+            alert(`データの同期(保存)に失敗しました。\n\n【エラー詳細】\n${error.message}\n\n※データ容量が大きすぎることが原因の可能性があります。`);
         }
     }
 
@@ -640,10 +634,7 @@ ${error.message}
     window.changeGlobalSlot = (slotVal) => {
         appSettings.currentSlot = parseInt(slotVal);
         window.saveUserDataToCloud();
-        
         updateSlotDisplays();
-        
-        // 現在のタブを再描画
         window.switchTab(currentActiveTab);
     };
     
@@ -1085,14 +1076,8 @@ ${error.message}
           if (stat && stat.count > 0) {
             const avgTime = stat.totalTime / stat.count; const missRate = stat.missCount / stat.count; const slowRate = stat.slowCount / stat.count;
             if (missRate > 0.3) cellDiv.className = "heatmap-cell color-miss"; else if (avgTime >= 0.75 || slowRate > 0.3) cellDiv.className = "heatmap-cell color-slow"; else if (avgTime < 0.375) cellDiv.className = "heatmap-cell color-excellent"; else cellDiv.className = "heatmap-cell color-good";
-            cellDiv.title = `ペア: ${displayPair}
-単語: ${posDict[internalKey] || '-'}
-平均タイム(1要素換算): ${(avgTime).toFixed(2)}秒
-プレイ回数: ${stat.count}
-ミス: ${stat.missCount}`;
-          } else { cellDiv.title = `ペア: ${displayPair}
-単語: ${posDict[internalKey] || '-'}
-未プレイ`; }
+            cellDiv.title = `ペア: ${displayPair}\n単語: ${posDict[internalKey] || '-'}\n平均タイム(1要素換算): ${(avgTime).toFixed(2)}秒\nプレイ回数: ${stat.count}\nミス: ${stat.missCount}`;
+          } else { cellDiv.title = `ペア: ${displayPair}\n単語: ${posDict[internalKey] || '-'}\n未プレイ`; }
           td.appendChild(cellDiv); tr.appendChild(td);
         }); table.appendChild(tr);
       }); container.appendChild(table);
